@@ -1,0 +1,24 @@
+{
+  "activity": {
+    "sport_type": "Run",
+    "distance_km": 6.533,
+    "moving_time_seconds": 2374,
+    "elapsed_time_seconds": 2448,
+    "average_moving_pace_seconds_per_km": 363,
+    "elevation_gain_m": 13.0,
+    "average_heart_rate_bpm": 154.1
+  },
+  "weather": {
+    "source": "Open-Meteo",
+    "data_type": "historical_reanalysis",
+    "is_estimated": true,
+    "coverage": "Start location, hour containing activity start; not the entire route",
+    "sample_time_utc": "2026-09-28T00:00:00Z",
+    "temperature_c": 15.9,
+    "feels_like_c": 14.2,
+    "humidity_percent": 66,
+    "wind_speed_kmh": 10.0,
+    "wind_from_degrees": 343,
+    "uv_index": null
+  }
+}

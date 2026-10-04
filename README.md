@@ -70,4 +70,29 @@ missing measurements are `null`, not zero. Both output modes use the same hourly
 The payload omits coordinates, account IDs, tokens, titles, and descriptions.
 No LLM is called yet. Use `--activity-id` with `--json` to select a workout.
 
-Status: connection and weather preview implemented; description updates and deployment are next.
+## Gemini recap demo
+
+Add `GEMINI_API_KEY=...` to `.env` (lowercase `gemini_api_key` is also accepted).
+No additional Python packages are needed; the script uses Gemini's REST API.
+
+```sh
+.venv/bin/python generate_recap.py
+```
+
+This sends only `sample_recap_input.json`, a synthetic workout, to Gemini.
+The default model is `gemini-3.1-flash-lite`, listed as free-tier eligible; actual
+access and quota depend on your AI Studio project. It does not change billing.
+Use `--model NAME` to choose another model. `--input FILE` sends the selected JSON
+file instead; this is an explicit data upload to Google, so inspect its contents first.
+Free-tier content may be used to improve Google's products.
+
+The script requests structured JSON with `recap` and `caveats`, rejects blocked,
+truncated, or malformed output, and prints latency/token usage to stderr.
+Output validation checks shape and size, not factual accuracy; review recaps.
+Quota errors stop with guidance, without automatic retries. No Strava updates occur.
+
+References: https://ai.google.dev/gemini-api/docs/pricing and
+https://ai.google.dev/gemini-api/docs/generate-content/structured-output
+
+Status: connection, weather preview, and Gemini synthetic recap demo implemented;
+description updates and deployment are next.
