@@ -1,5 +1,6 @@
 """Connect a personal Strava account using a local OAuth callback."""
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -26,15 +27,15 @@ def load_credentials():
     return values["STRAVA_CLIENT_ID"], values["STRAVA_CLIENT_SECRET"]
 
 
-def validate_callback(query, expected_state):
+def validate_callback(query, expected_state, required_scopes=None):
     state = query.get("state", [""])[0]
     if not secrets.compare_digest(state, expected_state):
         raise ValueError("Invalid login state. Restart the connection script.")
     if "error" in query:
         raise ValueError("Authorization was declined. No credentials were saved.")
     scopes = set(query.get("scope", [""])[0].replace(",", " ").split())
-    if not REQUIRED_SCOPES.issubset(scopes):
-        raise ValueError("Activity read access is required. Restart and enable it.")
+    if not (required_scopes or REQUIRED_SCOPES).issubset(scopes):
+        raise ValueError("Requested activity permissions are required. Restart and enable them.")
     code = query.get("code", [""])[0]
     if not code:
         raise ValueError("Authorization code is missing. Restart the script.")
@@ -54,6 +55,10 @@ def save_tokens(tokens):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--write", action="store_true", help="Also request permission to update activity descriptions")
+    args = parser.parse_args()
+    required_scopes = REQUIRED_SCOPES | ({"activity:write"} if args.write else set())
     if not ssl.create_default_context().get_ca_certs():
         raise SystemExit(
             'Python has no trusted HTTPS certificates. On macOS, run '
@@ -77,7 +82,7 @@ def main():
                 self.send_error(404)
                 return
             try:
-                code, scopes = validate_callback(parse_qs(parts.query), state)
+                code, scopes = validate_callback(parse_qs(parts.query), state, required_scopes)
             except ValueError as error:
                 self.respond(400, str(error))
                 return
@@ -133,10 +138,12 @@ def main():
             "redirect_uri": "http://localhost:8000/callback",
             "response_type": "code",
             "approval_prompt": "force",
-            "scope": ",".join(sorted(REQUIRED_SCOPES)),
+            "scope": ",".join(sorted(required_scopes)),
             "state": state,
         })
         print("Opening Strava. Authorize activity read access (including Only You activities).")
+        if args.write:
+            print("Also requesting activity write access for description updates.")
         print("If your browser doesn't open, visit this URL:\n" + url)
         webbrowser.open(url)
         deadline = time.monotonic() + 600

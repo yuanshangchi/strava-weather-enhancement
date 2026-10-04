@@ -98,5 +98,31 @@ Quota errors stop with guidance, without automatic retries. No Strava updates oc
 References: https://ai.google.dev/gemini-api/docs/pricing and
 https://ai.google.dev/gemini-api/docs/generate-content/structured-output
 
-Status: connection, weather preview, and Gemini synthetic recap demo implemented;
-description updates and deployment are next.
+## Preview and save a Strava description
+
+```sh
+.venv/bin/python sync_description.py
+```
+
+This selects your latest suitable outdoor activity, fetches its full description
+and weather, and sends compact workout facts to Gemini. It prints a proposed
+description and saves it alongside the original in owner-only `description_draft.json`.
+It preserves text outside its `[Workout Weather Recap]` block and replaces that
+block on subsequent previews. Use `--activity-id ID` to choose another activity.
+
+After reviewing the draft, authorize write access once, then save it:
+
+```sh
+.venv/bin/python connect_strava.py --write
+.venv/bin/python sync_description.py --apply
+```
+
+Applying uses the exact saved draft without regenerating the recap. It checks the
+current description for intervening edits, changes only `description`, and checks
+the returned description. The draft retains the original text for manual recovery.
+There is still a small race if another edit happens between the final read and PUT;
+avoid editing the activity while applying. Previewing again replaces the draft, so
+copy it first if you want to keep an older backup. Custom `--draft PATH` files should
+also be kept out of source control.
+
+Status: manual recap preview and description updates implemented; deployment next.
