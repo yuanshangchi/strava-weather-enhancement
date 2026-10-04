@@ -65,7 +65,9 @@ Run offline checks with `.venv/bin/python -m unittest -v`.
 
 This prints a JSON object with `activity` and `weather` sections. It calculates
 distance in kilometers and pace in seconds per kilometer using moving time.
-Moving and elapsed durations remain separate. Units are included in field names;
+Moving and elapsed durations remain separate, formatted as total minutes and seconds
+(e.g. `87 minutes and 7 seconds`), including durations longer than an hour.
+Pace is still calculated from raw seconds. Units are included in other field names;
 missing measurements are `null`, not zero. Both output modes use the same hourly sample.
 The payload omits coordinates, account IDs, tokens, titles, and descriptions.
 No LLM is called yet. Use `--activity-id` with `--json` to select a workout.
@@ -89,6 +91,8 @@ Free-tier content may be used to improve Google's products.
 The script requests structured JSON with `recap` and `caveats`, rejects blocked,
 truncated, or malformed output, and prints latency/token usage to stderr.
 Output validation checks shape and size, not factual accuracy; review recaps.
+Previously saved JSON with `moving_time_seconds` and `elapsed_time_seconds` is
+converted automatically before requesting a recap; the input file is left unchanged.
 Quota errors stop with guidance, without automatic retries. No Strava updates occur.
 
 References: https://ai.google.dev/gemini-api/docs/pricing and

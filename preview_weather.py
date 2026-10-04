@@ -128,6 +128,17 @@ def finite_number(value):
     return value if math.isfinite(value) else None
 
 
+def format_duration(seconds):
+    """Express whole-second durations in total minutes and remaining seconds."""
+    seconds = finite_number(seconds)
+    if seconds is None or seconds < 0:
+        return None
+    minutes, remainder = divmod(round(seconds), 60)
+    minute_unit = "minute" if minutes == 1 else "minutes"
+    second_unit = "second" if remainder == 1 else "seconds"
+    return f"{minutes} {minute_unit} and {remainder} {second_unit}"
+
+
 def build_recap_input(activity, weather_data, start, *, weather_source):
     """Build an allowlisted factual payload for a future LLM recap."""
     target, sample = weather_sample(weather_data, start)
@@ -141,8 +152,8 @@ def build_recap_input(activity, weather_data, start, *, weather_source):
         "activity": {
             "sport_type": activity.get("sport_type") or activity.get("type"),
             "distance_km": round(distance_km, 3) if distance_km is not None else None,
-            "moving_time_seconds": moving,
-            "elapsed_time_seconds": finite_number(activity.get("elapsed_time")),
+            "moving_time": format_duration(moving),
+            "elapsed_time": format_duration(activity.get("elapsed_time")),
             "average_moving_pace_seconds_per_km": pace,
             "elevation_gain_m": finite_number(activity.get("total_elevation_gain")),
             "average_heart_rate_bpm": finite_number(activity.get("average_heartrate")),
