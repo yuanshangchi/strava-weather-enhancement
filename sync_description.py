@@ -6,24 +6,50 @@ import os
 from pathlib import Path
 import tempfile
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from connect_strava import ROOT
-from generate_recap import generate_recap, load_key, validate_result
-from preview_weather import access_token, build_recap_input, fetch_json, get_activity, weather_request
+from preview_weather import access_token, fetch_json, get_activity, weather_request, weather_sample
+from route_matches import select_match
 
 BEGIN = "[Workout Weather Recap]"
 END = "[/Workout Weather Recap]"
 DEFAULT_DRAFT = ROOT / "description_draft.json"
 
 
-def merge_description(original, recap):
-    validate_result(recap)
-    text = recap["recap"] + "\n" + "\n".join(recap["caveats"])
+def format_weather_description(data, start):
+    """A compact weather-only block, omitting unavailable measurements."""
+    _, sample = weather_sample(data, start)
+    lines = ["Weather near the start (estimated)"]
+    temperature = []
+    for key, label in (("temperature_2m", "Temperature"), ("apparent_temperature", "Feels like")):
+        if sample[key] is not None:
+            temperature.append(f"{label}: {sample[key]:g}°C")
+    if temperature:
+        lines.append(" · ".join(temperature))
+    if sample["wind_speed_10m"] is not None:
+        wind = f"Wind: {sample['wind_speed_10m']:g} km/h"
+        direction = sample["wind_direction_10m"]
+        if direction is not None and sample["wind_speed_10m"] > 0:
+            compass = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")[int((direction % 360 + 22.5) // 45) % 8]
+            wind += f" from {compass}"
+        lines.append(wind)
+    other = []
+    for key, label, unit in (("relative_humidity_2m", "Humidity", "%"), ("uv_index", "UV index", "")):
+        if sample[key] is not None:
+            other.append(f"{label}: {sample[key]:g}{unit}")
+    if other:
+        lines.append(" · ".join(other))
+    if len(lines) == 1:
+        raise RuntimeError("No weather measurements available. Existing description will be preserved.")
+    lines.append("Source: Open-Meteo · Hourly estimate at the start location")
+    return "\n".join(lines)
+
+
+def merge_description(original, text):
     if BEGIN in text or END in text:
         raise RuntimeError("Generated text contains reserved markers. Generate a new preview.")
-    block = f"{BEGIN}\nAI-generated recap\n{text}\nWeather source: Open-Meteo\n{END}"
+    block = f"{BEGIN}\n{text}\n{END}"
     original = original or ""
     if BEGIN not in original and END not in original:
         return original + ("\n\n" if original else "") + block
@@ -48,21 +74,53 @@ def save_draft(path, draft):
             os.unlink(temporary)
 
 
+def comparison_text(current_weather, previous_weather, previous):
+    differences = []
+    for key, label, unit in (("temperature_2m", "temperature", "°C"),
+                             ("apparent_temperature", "feels-like temperature", "°C"),
+                             ("relative_humidity_2m", "humidity", " percentage points"),
+                             ("wind_speed_10m", "wind speed", " km/h")):
+        current, old = current_weather.get(key), previous_weather.get(key)
+        if current is not None and old is not None:
+            delta = current - old
+            change = 'unchanged' if abs(delta) < 0.05 else f'{abs(delta):.1f}{unit} {"higher" if delta > 0 else "lower"}'
+            differences.append(f'{label} {change}')
+    if not differences:
+        return 'A route match was found, but comparable weather measurements are unavailable.'
+    date = (previous.get('start_date_local') or previous['start_date'])[:10]
+    return (f"Compared with your same-direction route match on {date}: " + '; '.join(differences) + '. '
+            'These are estimated start-hour conditions, not whole-run measurements. '
+            'Weather may affect comfort, but this comparison does not establish its effect on performance. '
+            'Wind speed alone does not indicate headwind exposure.')
+
+
 def prepare_draft(activity_id=None):
     token = access_token()
     selected = get_activity(token, activity_id)
     activity = fetch_json(f"https://www.strava.com/api/v3/activities/{selected['id']}", token=token)
     url, start = weather_request(activity)
-    source = "historical_reanalysis" if urlsplit(url).hostname == "archive-api.open-meteo.com" else "recent_forecast"
-    facts = build_recap_input(activity, fetch_json(url), start, weather_source=source)
-    recap = generate_recap(facts, load_key(), "gemini-3.1-flash-lite")
+    weather_data = fetch_json(url)
+    weather_text = format_weather_description(weather_data, start)
+    report, match = select_match(token, activity)
+    if match:
+        other_url, other_start = weather_request(match)
+        try:
+            _, previous_weather = weather_sample(fetch_json(other_url), other_start)
+            _, current_weather = weather_sample(weather_data, start)
+            weather_text += '\n\n' + comparison_text(current_weather, previous_weather, match)
+        except RuntimeError as error:
+            report['weather_warning'] = str(error)
+            weather_text += '\n\nA route match was found, but its weather could not be retrieved; showing current weather only.'
+    else:
+        weather_text += '\n\n' + report['reason'] + '.'
     original = activity.get("description") or ""
     return {
         "activity_id": activity["id"],
         "athlete_id": activity["athlete"]["id"],
         "activity_name": activity["name"],
         "original_description": original,
-        "proposed_description": merge_description(original, recap),
+        "proposed_description": merge_description(original, weather_text),
+        "route_selection": report,
     }
 
 
@@ -107,7 +165,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--activity-id", type=int, help="Activity to preview; defaults to latest suitable outdoor activity")
     parser.add_argument("--draft", type=Path, default=DEFAULT_DRAFT)
-    parser.add_argument("--apply", action="store_true", help="Publish the exact saved draft without calling Gemini again")
+    parser.add_argument("--apply", action="store_true", help="Publish the exact saved weather description draft")
     args = parser.parse_args()
     if args.apply:
         if args.activity_id is not None:
@@ -119,6 +177,9 @@ def main():
         save_draft(args.draft, draft)
         print(f"Activity: {draft['activity_name']}\nhttps://www.strava.com/activities/{draft['activity_id']}")
         print("\nProposed description:\n\n" + draft["proposed_description"])
+        print("\nRoute selection: " + draft['route_selection']['reason'])
+        if draft['route_selection']['selected_id']:
+            print("Comparison activity: " + str(draft['route_selection']['selected_id']))
         print(f"\nPreview only. Draft and original description saved to {args.draft}.")
         print("After reviewing, rerun with --apply (and the same --draft path if customized).")
 

@@ -10,17 +10,35 @@ from connect_strava import validate_callback
 
 class SyncTests(unittest.TestCase):
     def test_preserve_text_and_replace_block(self):
-        recap = {"recap": "A run.", "caveats": ["Start weather only."]}
+        recap = "Temperature: 18°C"
         original = "My notes 🏃\n "
         first = sync.merge_description(original, recap)
         self.assertTrue(first.startswith(original + '\n\n'))
         self.assertEqual(sync.merge_description(first, recap), first)
-        updated = sync.merge_description(first + '\nAfterward', recap | {'recap': 'Updated run.'})
+        updated = sync.merge_description(first + '\nAfterward', 'Temperature: 19°C')
         self.assertTrue(updated.endswith('\nAfterward'))
         self.assertEqual(updated.count(sync.BEGIN), 1)
         for malformed in (sync.BEGIN, sync.END, sync.END + sync.BEGIN, sync.BEGIN * 2 + sync.END):
             with self.assertRaises(RuntimeError):
                 sync.merge_description(malformed, recap)
+
+    def test_old_ai_block_is_replaced_and_missing_weather_is_omitted(self):
+        from datetime import datetime, timezone
+        start = datetime(2026, 10, 4, tzinfo=timezone.utc)
+        data = {'hourly': {'time': [int(start.timestamp())], 'temperature_2m': [0],
+                          'wind_speed_10m': [8], 'wind_direction_10m': [270], 'uv_index': [None]}}
+        text = sync.format_weather_description(data, start)
+        self.assertIn('Temperature: 0°C', text)
+        self.assertIn('8 km/h from W', text)
+        self.assertNotIn('UV', text)
+        old = f'Personal notes\n{sync.BEGIN}\nAI-generated recap\nRan 5 km\n{sync.END}\nMore notes'
+        new = sync.merge_description(old, text)
+        self.assertNotIn('5 km', new)
+        self.assertNotIn('AI-generated', new)
+        self.assertTrue(new.startswith('Personal notes\n'))
+        self.assertTrue(new.endswith('\nMore notes'))
+        with self.assertRaises(RuntimeError):
+            sync.format_weather_description({'hourly': {'time': [int(start.timestamp())]}}, start)
 
     def test_write_scope_is_required_during_reconnect(self):
         query = {'state': ['s'], 'code': ['c'], 'scope': ['activity:read_all']}
