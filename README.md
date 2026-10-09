@@ -173,3 +173,43 @@ script remains available for LLM experiments. Deployment is next.
 See [aws/README.md](aws/README.md) for the Lambda receiver, FIFO worker,
 cloud credential migration, deployment, and Strava subscription steps.
 Publishing defaults to disabled. Local preview/apply commands still work.
+
+## Gemini comparison recap
+
+Opt into Gemini when preparing a new draft:
+
+```sh
+.venv/bin/python sync_description.py --activity-id 20510125614 --gemini --draft gemini_description_draft.json
+```
+
+The current run and selected similar-route run's **detail** responses provide
+allowlisted distance, formatted durations, pace, elevation, heart rate,
+`relative_effort` from `suffer_score`, and `reported_effort_1_to_10` from
+`perceived_exertion` when present and valid. Relative Effort is accumulated
+workload, not a reported feeling or pure intensity score. Missing fields remain
+null; Relative Effort never substitutes for a missing perceived-exertion rating.
+Each run's weather and Python-computed current-minus-comparison differences are
+sent without activity IDs, titles, descriptions, GPS coordinates, or credentials.
+No match or unavailable comparison weather is represented explicitly.
+
+Set GEMINI_API_KEY in .env for local use. Default model: gemini-3.1-flash-lite;
+override with --model. Without --gemini, the deterministic weather template is
+used. The Gemini prompt allows cautious possible weather effects but prohibits
+causal conclusions and invented feelings. JSON shape, completion, size and
+reserved-marker checks run; these are not comprehensive factual verification.
+Review every preview. Recaps target two or three short sentences (at most 50 words), one per line.
+Only the Open-Meteo source credit is appended; disclaimers stay in the saved
+JSON caveats and input metadata, not in the displayed description.
+Invalid output, missing key, quota or network errors fall back to the template.
+The draft records generation mode, model, prompt version, input and output for
+review, without keys. Model generation is not deterministic. Re-running preview
+may generate different wording; --apply always reuses the exact saved draft:
+
+```sh
+.venv/bin/python sync_description.py --apply --draft gemini_description_draft.json
+```
+
+A crash before draft persistence can regenerate a recap. Once saved, AWS retries
+reuse that draft and do not invoke Gemini again. Existing previews do not change.
+Strava's restrictions on API-derived data in AI applications still apply; this
+integration does not remove those restrictions.

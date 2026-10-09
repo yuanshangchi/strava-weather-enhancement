@@ -86,12 +86,13 @@ def prepare_facts(facts):
     return {**facts, "activity": activity}
 
 
-def generate_recap(facts, key, model):
-    facts = prepare_facts(facts)
+def generate_recap(facts, key, model, *, prompt=PROMPT):
+    if 'current' not in facts:
+        facts = prepare_facts(facts)
     if not re.fullmatch(r"[a-zA-Z0-9._-]+", model):
         raise RuntimeError("Invalid model name.")
     request_body = {
-        "systemInstruction": {"parts": [{"text": PROMPT}]},
+        "systemInstruction": {"parts": [{"text": prompt}]},
         "contents": [{"role": "user", "parts": [{"text": json.dumps(facts, allow_nan=False)}]}],
         "generationConfig": {
             "maxOutputTokens": 1024,

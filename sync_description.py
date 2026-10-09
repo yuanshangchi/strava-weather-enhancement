@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from connect_strava import ROOT
 from preview_weather import access_token, fetch_json, get_activity, weather_request, weather_sample
 from route_matches import select_match
+from comparison_recap import build_comparison_input, narrate, MODEL, PROMPT_VERSION
 
 BEGIN = "[Workout Weather Recap]"
 END = "[/Workout Weather Recap]"
@@ -94,7 +95,7 @@ def comparison_text(current_weather, previous_weather, previous):
             'Wind speed alone does not indicate headwind exposure.')
 
 
-def prepare_draft(activity_id=None, *, token=None, activity=None):
+def prepare_draft(activity_id=None, *, token=None, activity=None, use_gemini=False, gemini_key=None, model=MODEL):
     token = token or access_token()
     if activity is None:
         selected = get_activity(token, activity_id)
@@ -103,17 +104,36 @@ def prepare_draft(activity_id=None, *, token=None, activity=None):
     weather_data = fetch_json(url)
     weather_text = format_weather_description(weather_data, start)
     report, match = select_match(token, activity)
+    other_weather_data, other_start, other_url = None, None, ''
+    if match and use_gemini:
+        # Summary activity responses may omit perceived exertion and Relative Effort.
+        match = fetch_json(f"https://www.strava.com/api/v3/activities/{match['id']}", token=token)
+        if match.get('athlete', {}).get('id') != activity['athlete']['id']:
+            raise RuntimeError('Comparison activity belongs to another athlete.')
     if match:
         other_url, other_start = weather_request(match)
         try:
-            _, previous_weather = weather_sample(fetch_json(other_url), other_start)
+            other_weather_data = fetch_json(other_url)
+            _, previous_weather = weather_sample(other_weather_data, other_start)
             _, current_weather = weather_sample(weather_data, start)
             weather_text += '\n\n' + comparison_text(current_weather, previous_weather, match)
         except RuntimeError as error:
+            other_weather_data = None
             report['weather_warning'] = str(error)
             weather_text += '\n\nA route match was found, but its weather could not be retrieved; showing current weather only.'
     else:
         weather_text += '\n\n' + report['reason'] + '.'
+    generation = {'mode': 'template'}
+    if use_gemini:
+        facts = build_comparison_input(activity, weather_data, start, url, match,
+                                       other_weather_data, other_start, other_url)
+        generation.update(model=model, prompt_version=PROMPT_VERSION, input=facts)
+        try:
+            weather_text, result = narrate(facts, key=gemini_key, model=model)
+            generation.update(mode='gemini', result=result)
+        except (RuntimeError, OSError, ValueError, KeyError, TypeError):
+            # Do not expose provider responses or secrets in saved diagnostics.
+            generation.update(mode='template_fallback', warning='Gemini unavailable or response invalid; used weather template.')
     original = activity.get("description") or ""
     return {
         "activity_id": activity["id"],
@@ -122,6 +142,7 @@ def prepare_draft(activity_id=None, *, token=None, activity=None):
         "original_description": original,
         "proposed_description": merge_description(original, weather_text),
         "route_selection": report,
+        "generation": generation,
     }
 
 
@@ -168,18 +189,23 @@ def main():
     parser.add_argument("--activity-id", type=int, help="Activity to preview; defaults to latest suitable outdoor activity")
     parser.add_argument("--draft", type=Path, default=DEFAULT_DRAFT)
     parser.add_argument("--apply", action="store_true", help="Publish the exact saved weather description draft")
+    parser.add_argument("--gemini", action="store_true", help="Generate a weather-focused Gemini recap from both runs")
+    parser.add_argument("--model", default=MODEL, help="Gemini model for --gemini")
     args = parser.parse_args()
     if args.apply:
-        if args.activity_id is not None:
-            parser.error("--apply uses the saved draft's activity; omit --activity-id")
+        if args.activity_id is not None or args.gemini:
+            parser.error("--apply uses the exact saved draft; omit --activity-id and --gemini")
         draft = json.loads(args.draft.read_text())
         print(apply_draft(draft))
     else:
-        draft = prepare_draft(args.activity_id)
+        draft = prepare_draft(args.activity_id, use_gemini=args.gemini, model=args.model)
         save_draft(args.draft, draft)
         print(f"Activity: {draft['activity_name']}\nhttps://www.strava.com/activities/{draft['activity_id']}")
         print("\nProposed description:\n\n" + draft["proposed_description"])
         print("\nRoute selection: " + draft['route_selection']['reason'])
+        print("Recap source: " + draft['generation']['mode'])
+        if draft['generation'].get('warning'):
+            print(draft['generation']['warning'])
         if draft['route_selection']['selected_id']:
             print("Comparison activity: " + str(draft['route_selection']['selected_id']))
         print(f"\nPreview only. Draft and original description saved to {args.draft}.")

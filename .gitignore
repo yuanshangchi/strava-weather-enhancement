@@ -14,3 +14,4 @@ aws/.aws-sam/
 aws/samconfig.toml
 aws/.tools-venv/
 aws/.lint-venv/
+gemini_description_draft.json

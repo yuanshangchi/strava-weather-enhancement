@@ -3,7 +3,8 @@ from pathlib import Path
 import shutil
 
 HERE = Path(__file__).resolve().parent
-FILES = ('connect_strava.py', 'preview_weather.py', 'route_matches.py', 'sync_description.py')
+FILES = ('connect_strava.py', 'preview_weather.py', 'route_matches.py', 'sync_description.py',
+         'generate_recap.py', 'comparison_recap.py')
 
 
 def main():

@@ -107,3 +107,16 @@ From the project directory:
 ```
 
 Tests use fake services and never call Strava, AWS, or publish descriptions.
+
+## Optional Gemini narration
+
+Add a `gemini_api_key` field alongside `client_id`, `client_secret`, and `tokens`
+in the existing Strava secret to enable Gemini for new worker drafts. Without
+that field the worker uses the deterministic weather template. The key is read
+only at runtime, never logged or stored in a draft. It is preserved during
+Strava token rotation. Package staging includes comparison_recap.py and
+generate_recap.py; no extra Python dependencies are needed for Gemini REST calls.
+Stored drafts are reused on retries, including template fallbacks. Adding a key
+or changing code does not regenerate already previewed/published drafts.
+After updating code, rebuild and deploy the package; local changes do not update
+an existing AWS deployment.
