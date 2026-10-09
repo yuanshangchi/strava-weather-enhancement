@@ -94,10 +94,11 @@ def comparison_text(current_weather, previous_weather, previous):
             'Wind speed alone does not indicate headwind exposure.')
 
 
-def prepare_draft(activity_id=None):
-    token = access_token()
-    selected = get_activity(token, activity_id)
-    activity = fetch_json(f"https://www.strava.com/api/v3/activities/{selected['id']}", token=token)
+def prepare_draft(activity_id=None, *, token=None, activity=None):
+    token = token or access_token()
+    if activity is None:
+        selected = get_activity(token, activity_id)
+        activity = fetch_json(f"https://www.strava.com/api/v3/activities/{selected['id']}", token=token)
     url, start = weather_request(activity)
     weather_data = fetch_json(url)
     weather_text = format_weather_description(weather_data, start)
@@ -124,16 +125,17 @@ def prepare_draft(activity_id=None):
     }
 
 
-def apply_draft(draft):
+def apply_draft(draft, *, token=None, scopes=None):
     # Validate the destination and content before any write.
     activity_id = draft["activity_id"]
     if type(activity_id) is not int or activity_id <= 0:
         raise RuntimeError("Invalid activity ID in draft.")
     if not all(isinstance(draft.get(k), str) for k in ("original_description", "proposed_description")):
         raise RuntimeError("Invalid description in draft.")
-    token = access_token()
-    stored = json.loads((ROOT / "tokens.json").read_text())
-    scopes = stored.get("scope", [])
+    token = token or access_token()
+    if scopes is None:
+        stored = json.loads((ROOT / "tokens.json").read_text())
+        scopes = stored.get("scope", [])
     if isinstance(scopes, str):
         scopes = scopes.replace(",", " ").split()
     if "activity:write" not in scopes:

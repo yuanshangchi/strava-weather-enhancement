@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Personal Strava weather webhook; queued processing, durable drafts, publishing off by default.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+Parameters:
+  AthleteId:
+    Type: String
+    AllowedPattern: '[1-9][0-9]*'
+  SubscriptionId:
+    Type: String
+    Default: '0'
+    AllowedPattern: '[0-9]+'
+    Description: Keep zero during handshake setup; set to the registered Strava subscription ID afterward.
+  StravaSecretArn:
+    Type: String
+    AllowedPattern: 'arn:aws:secretsmanager:us-east-2:[0-9]{12}:secret:.+'
+    Description: Existing secret containing client_id, client_secret, and tokens.
+  WebhookSecretArn:
+    Type: String
+    AllowedPattern: 'arn:aws:secretsmanager:us-east-2:[0-9]{12}:secret:.+'
+    Description: Existing secret containing independent random key and verify_token values.
+  PublishEnabled:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [arm64]
+    CodeUri: build/
+    MemorySize: 256
+Resources:
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Public HTTPS is required by Strava; random callback path provides a bearer secret.
+        must: Do not enable access logging of paths or query strings containing verification secrets.
+    Properties:
+      StageName: live
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 5
+        ThrottlingRateLimit: 2
+  DeadLetters:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Retain failed jobs for inspection and deliberate replay.
+        must: FIFO and encrypted, with 14 day retention.
+    Properties:
+      FifoQueue: true
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+  Jobs:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Decouple two-second webhook acknowledgments from weather and route API calls.
+        must: One message group; visibility at least six times worker timeout.
+    Properties:
+      FifoQueue: true
+      SqsManagedSseEnabled: true
+      VisibilityTimeout: 1800
+      DelaySeconds: 60
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetters.Arn
+        maxReceiveCount: 5
+  Drafts:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Preserve exact drafts across retries and deduplicate successful activity updates.
+        must: No tokens; JSON draft stored as string; retained on stack deletion.
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+  Receiver:
+    Type: AWS::Serverless::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Validate handshake and enqueue only this athlete's activity creation events.
+        must: Never fetch weather here; never log incoming event or URL.
+    Properties:
+      Handler: webhook.handler
+      Timeout: 3
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref Jobs
+          ATHLETE_ID: !Ref AthleteId
+          SUBSCRIPTION_ID: !Ref SubscriptionId
+          WEBHOOK_KEY: !Sub '{{resolve:secretsmanager:${WebhookSecretArn}:SecretString:key}}'
+          VERIFY_TOKEN: !Sub '{{resolve:secretsmanager:${WebhookSecretArn}:SecretString:verify_token}}'
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt Jobs.QueueName
+      Events:
+        Verify:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /strava/webhook/{key}
+            Method: GET
+        Receive:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /strava/webhook/{key}
+            Method: POST
+  Worker:
+    Type: AWS::Serverless::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Reuse deterministic weather comparison with durable drafts and cloud token rotation.
+        must: FIFO single group and batch size one; never run local token refresh concurrently.
+    Properties:
+      Handler: worker.handler
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          ATHLETE_ID: !Ref AthleteId
+          STRAVA_SECRET_ARN: !Ref StravaSecretArn
+          JOBS_TABLE: !Ref Drafts
+          PUBLISH_ENABLED: !Ref PublishEnabled
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt Jobs.QueueName
+        - Statement:
+            - Effect: Allow
+              Action: [secretsmanager:GetSecretValue, secretsmanager:PutSecretValue]
+              Resource: !Ref StravaSecretArn
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource: !GetAtt Drafts.Arn
+      Events:
+        NewActivity:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt Jobs.Arn
+            BatchSize: 1
+  ReceiverLogs:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Bound runtime log retention.
+        must: No request or secret logging.
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${Receiver}'
+      RetentionInDays: 14
+  WorkerLogs:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Store processing status and failures for troubleshooting.
+        must: Never log credentials or full activity data.
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${Worker}'
+      RetentionInDays: 14
+  FailedJobsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Make exhausted retries visible in CloudWatch.
+        must: Alarm has no notification destination until one is configured.
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DeadLetters.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+Outputs:
+  WebhookBaseUrl:
+    Description: Append /strava/webhook/ and the secret key; do not share the completed URL.
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live'
+  DraftsTable:
+    Description: Table containing previewed descriptions and processing status.
+    Value: !Ref Drafts
+  DeadLetterQueueUrl:
+    Description: Inspect failures here before replaying.
+    Value: !Ref DeadLetters

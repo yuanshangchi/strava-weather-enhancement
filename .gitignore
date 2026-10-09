@@ -9,3 +9,8 @@ description_draft.json
 .description-*
 workout_facts.json
 route_preview.json
+aws/build/
+aws/.aws-sam/
+aws/samconfig.toml
+aws/.tools-venv/
+aws/.lint-venv/

@@ -169,3 +169,9 @@ also be kept out of source control.
 
 Status: weather-only description updates implemented; the standalone Gemini recap
 script remains available for LLM experiments. Deployment is next.
+
+## AWS webhook (prepared, not deployed)
+
+See [aws/README.md](aws/README.md) for the Lambda receiver, FIFO worker,
+cloud credential migration, deployment, and Strava subscription steps.
+Publishing defaults to disabled. Local preview/apply commands still work.
