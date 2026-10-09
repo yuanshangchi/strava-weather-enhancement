@@ -88,7 +88,7 @@ def comparison_text(current_weather, previous_weather, previous):
     if not differences:
         return 'A route match was found, but comparable weather measurements are unavailable.'
     date = (previous.get('start_date_local') or previous['start_date'])[:10]
-    return (f"Compared with your same-direction route match on {date}: " + '; '.join(differences) + '. '
+    return (f"Compared with your similar-route run on {date}: " + '; '.join(differences) + '. '
             'These are estimated start-hour conditions, not whole-run measurements. '
             'Weather may affect comfort, but this comparison does not establish its effect on performance. '
             'Wind speed alone does not indicate headwind exposure.')

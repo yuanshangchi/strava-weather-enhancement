@@ -1,4 +1,4 @@
-"""Find recent same-direction route matches; no Strava writes or LLM calls."""
+"""Find recent similar-route runs using distance and bidirectional path overlap."""
 
 import argparse
 from bisect import bisect_right
@@ -11,7 +11,6 @@ from preview_weather import access_token, fetch_json, finite_number, get_activit
 
 WINDOW_DAYS = 90
 DISTANCE_TOLERANCE = 0.10
-ENDPOINT_METERS = 200
 PATH_METERS = 50
 MIN_OVERLAP = 0.90
 
@@ -109,25 +108,11 @@ def compare_routes(target, candidate):
         a_ll = decode_polyline((target.get('map') or {}).get('summary_polyline'))
         b_ll = decode_polyline((candidate.get('map') or {}).get('summary_polyline'))
         a, b = project(a_ll, a_ll[0]), project(b_ll, a_ll[0])
-        forward_ends = max(math.dist(a[0], b[0]), math.dist(a[-1], b[-1]))
-        reverse_ends = max(math.dist(a[0], b[-1]), math.dist(a[-1], b[0]))
-        if min(forward_ends, reverse_ends) > ENDPOINT_METERS:
-            return result | {'reason': 'Start/end locations differ by more than 200 m'}
         ab, ba = coverage(resample(a), b), coverage(resample(b), a)
         result.update(target_overlap=round(ab, 3), candidate_overlap=round(ba, 3))
         if min(ab, ba) < MIN_OVERLAP:
             return result | {'reason': 'Less than 90% overlap in one or both paths'}
-        # Compare ordered locations at equal fractions of route length.
-        # Ambiguous retraced/out-and-back paths are deliberately not auto-selected.
-        aa, bb = resample(a, 101), resample(b, 101)
-        forward = sum(math.dist(x, y) for x, y in zip(aa, bb)) / len(aa)
-        reverse = sum(math.dist(x, y) for x, y in zip(aa, reversed(bb))) / len(aa)
-        result.update(forward_error_m=round(forward, 1), reverse_error_m=round(reverse, 1))
-        if forward_ends <= ENDPOINT_METERS and forward <= 150 and reverse - forward >= 50 and forward < reverse * 0.8:
-            return result | {'status': 'same_direction', 'reason': 'Similar path and travel order'}
-        if reverse_ends <= ENDPOINT_METERS and reverse <= 150 and forward - reverse >= 50 and reverse < forward * 0.8:
-            return result | {'status': 'opposite_direction', 'reason': 'Similar path, reversed travel order'}
-        return result | {'status': 'uncertain_direction', 'reason': 'Overlap is high but direction/order is ambiguous'}
+        return result | {'status': 'similar_route', 'reason': 'Similar distance and at least 90% overlap in both paths'}
     except (ValueError, TypeError):
         return result | {'status': 'unavailable', 'reason': 'Missing or invalid route geometry'}
 
@@ -175,7 +160,7 @@ def select_match(token, target):
         if not is_run(candidate):
             continue
         diagnostics = compare_routes(target, candidate)
-        suitable = diagnostics['status'] == 'same_direction'
+        suitable = diagnostics['status'] == 'similar_route'
         # Treat untagged runs and generic runs (0) alike, not as proof of equal effort.
         if suitable and (target.get('workout_type') or 0) != (candidate.get('workout_type') or 0):
             suitable = False
@@ -190,7 +175,8 @@ def select_match(token, target):
         if suitable and selected is None:
             selected = candidate
             report['selected_id'] = candidate['id']
-    report['reason'] = 'Most recent suitable same-direction match' if selected else 'No comparable same-direction run found in the previous 90 days'
+    report['reason'] = ('Most recent suitable similar-route run' if selected
+                        else 'No comparable similar-route run found in the previous 90 days')
     return report, selected
 
 

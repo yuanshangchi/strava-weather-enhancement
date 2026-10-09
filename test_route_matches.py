@@ -41,18 +41,43 @@ class RouteTests(unittest.TestCase):
 
     def test_loop_direction_and_gps_noise(self):
         target = activity()
-        self.assertEqual(routes.compare_routes(target, activity(2, 1))['status'], 'same_direction')
-        self.assertEqual(routes.compare_routes(target, activity(2, 1, list(reversed(LOOP))))['status'], 'opposite_direction')
+        self.assertEqual(routes.compare_routes(target, activity(2, 1))['status'], 'similar_route')
+        self.assertEqual(routes.compare_routes(target, activity(2, 1, list(reversed(LOOP))))['status'], 'similar_route')
         noisy = [(lat + .00003, lon + .00003) for lat, lon in LOOP]
-        self.assertEqual(routes.compare_routes(target, activity(2, 1, noisy))['status'], 'same_direction')
+        self.assertEqual(routes.compare_routes(target, activity(2, 1, noisy))['status'], 'similar_route')
 
-    def test_different_path_extra_laps_and_ambiguous_retracing(self):
+    def test_different_path_extra_laps_and_retracing(self):
         different = [LOOP[0], (37.01, -122.01), (37.02, -122), LOOP[0]]
         self.assertEqual(routes.compare_routes(activity(), activity(2, 1, different))['status'], 'rejected')
         self.assertEqual(routes.compare_routes(activity(), activity(2, 1, LOOP + LOOP[1:], distance=8000))['status'], 'rejected')
         retraced = [LOOP[0], LOOP[1], LOOP[0]]
-        self.assertEqual(routes.compare_routes(activity(points=retraced), activity(2, 1, retraced))['status'], 'uncertain_direction')
+        self.assertEqual(routes.compare_routes(activity(points=retraced), activity(2, 1, retraced))['status'], 'similar_route')
         self.assertEqual(routes.compare_routes(activity(), activity(2, 1, map={}))['status'], 'unavailable')
+
+    def test_shifted_loop_start_and_imperfect_out_and_back(self):
+        shifted = LOOP[2:-1] + LOOP[:3]
+        self.assertEqual(routes.compare_routes(activity(), activity(2, 1, shifted))['status'], 'similar_route')
+        retraced = [LOOP[0], LOOP[1], LOOP[2], LOOP[1], LOOP[0]]
+        imperfect = retraced[:-1] + [(37, -121.999)]
+        self.assertEqual(routes.compare_routes(activity(points=retraced), activity(2, 1, imperfect))['status'], 'similar_route')
+
+    def test_overlap_required_in_both_paths(self):
+        # Same stated distance must not allow a subset path to pass.
+        short = [LOOP[0], LOOP[1]]
+        result = routes.compare_routes(activity(), activity(2, 1, short))
+        self.assertEqual(result['status'], 'rejected')
+        self.assertEqual(result['candidate_overlap'], 1.0)
+        self.assertLess(result['target_overlap'], .90)
+
+    def test_out_and_back_selection_keeps_other_filters(self):
+        retraced = [LOOP[0], LOOP[1], LOOP[0]]
+        target = activity(points=retraced)
+        candidates = [activity(2, 1, retraced, workout_type=1),
+                      activity(3, 2, retraced, elapsed_time=2500), activity(4, 3, retraced)]
+        with patch.object(routes, 'recent_activities', return_value=candidates):
+            report, selected = routes.select_match('token', target)
+        self.assertEqual(selected['id'], 4)
+        self.assertEqual(report['candidates'][2]['status'], 'similar_route')
 
     def test_window_pagination_and_sorting(self):
         first = [activity(100+i, 20) for i in range(100)]
@@ -74,8 +99,8 @@ class RouteTests(unittest.TestCase):
                       activity(4, 3, elapsed_time=2500), activity(5, 4), activity(6, 8)]
         with patch.object(routes, 'recent_activities', return_value=candidates):
             report, selected = routes.select_match('token', activity())
-        self.assertEqual(selected['id'], 5)
-        self.assertEqual(report['selected_id'], 5)
+        self.assertEqual(selected['id'], 2)
+        self.assertEqual(report['selected_id'], 2)
 
     def test_no_match_and_missing_target(self):
         with patch.object(routes, 'recent_activities', return_value=[]):
@@ -91,7 +116,7 @@ class RouteTests(unittest.TestCase):
         target = activity(name='Run', athlete={'id': 7}, description='Notes')
         start = routes.start_time(target)
         weather = {'hourly': {'time': [int(start.timestamp())], 'temperature_2m': [18]}}
-        report = {'reason': 'No comparable same-direction run found in the previous 90 days', 'selected_id': None}
+        report = {'reason': 'No comparable similar-route run found in the previous 90 days', 'selected_id': None}
         with patch.object(sync, 'access_token', return_value='token'), patch.object(sync, 'get_activity', return_value=target), patch.object(sync, 'fetch_json', side_effect=[target, weather]), patch.object(sync, 'weather_request', return_value=('url', start)), patch.object(sync, 'select_match', return_value=(report, None)):
             draft = sync.prepare_draft(1)
         self.assertIn('18°C', draft['proposed_description'])

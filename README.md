@@ -108,27 +108,25 @@ https://ai.google.dev/gemini-api/docs/generate-content/structured-output
 
 Searches the 90 days before that activity, paginating through all activity summaries.
 Reports each outdoor run's match status and selects the most recent suitable
-same-direction run. No route database, LLM call, or Strava write is involved.
+similar-route run. No route database, LLM call, or Strava write is involved.
 
-Initial matching thresholds (heuristics to verify against your routes):
-- Distance within 10% of the target, endpoints within 200 m.
+Matching thresholds (heuristics to verify against your routes):
+- Distance within 10% of the target.
 - At least 90% of each path within 50 m of the other, using decoded summary
   polylines and approximately 25 m samples (capped at 801 samples per path).
-- Direction from the average separation of 101 ordered, distance-normalized
-  positions, compared forward and backward. The winning error must be at most
-  150 m, at least 50 m smaller, and under 80% of the other direction's error.
-- Opposite direction and uncertain direction are shown but never auto-selected.
+- No direction, endpoint, or out-and-back classification requirement. Opposite
+  loop directions and different recording start points may match.
 - Known workout types must agree (untagged and generic runs are grouped together).
   Candidates with over 10 minutes total nonmoving time are conservatively excluded;
   this does not imply one long pause or a restroom stop.
 
-Summary GPS can be simplified, hidden, or missing. Small loops, retraced paths,
-different loop start points, and out-and-back routes can be marked uncertain.
-Missing target geometry produces an explicit unavailable result. API errors stop
-the search rather than falsely reporting no match. A route that was last run more
-than 90 days ago is not distinguished from a new route; the search never widens.
-Route similarity does not prove equal effort or conditions. Direction matching
-does not calculate headwind exposure.
+Summary GPS can be simplified, hidden, or missing. Missing target geometry
+produces an explicit unavailable result. API errors stop the search rather than
+falsely reporting no match. A route last run more than 90 days ago is not
+distinguished from a new route; the search never widens. Similar routes do not
+prove equal effort, travel order, wind exposure, or conditions. Parallel paths
+within the 50 m tolerance may match. Distance filtering excludes substantially
+different lap counts but does not guarantee identical travel patterns.
 
 ```sh
 .venv/bin/python sync_description.py
@@ -145,7 +143,7 @@ Unavailable weather measurements are omitted. Use `--activity-id ID` to choose a
 The preview now searches for a recent route match. For a selected match it appends
 start-hour weather differences, without claiming that weather caused a performance
 change. Without a match it retains current weather and states that no comparable
-same-direction run was found in the prior 90 days (or that GPS is unavailable).
+similar-route run was found in the prior 90 days (or that GPS is unavailable).
 Historical-weather failures are explicitly labeled instead of choosing another
 run for its weather. Match diagnostics are included in the saved draft.
 Use a separate draft while testing, e.g. `--draft route_preview.json`, to keep your
