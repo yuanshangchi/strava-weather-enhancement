@@ -189,9 +189,11 @@ def main():
     parser.add_argument("--activity-id", type=int, help="Activity to preview; defaults to latest suitable outdoor activity")
     parser.add_argument("--draft", type=Path, default=DEFAULT_DRAFT)
     parser.add_argument("--apply", action="store_true", help="Publish the exact saved weather description draft")
-    parser.add_argument("--gemini", action="store_true", help="Generate a weather-focused Gemini recap from both runs")
+    parser.add_argument("--gemini", action="store_true", help="Retired: use the official Strava MCP in Claude")
     parser.add_argument("--model", default=MODEL, help="Gemini model for --gemini")
     args = parser.parse_args()
+    if args.gemini:
+        parser.error('Gemini integration is retired. Open Claude Code in this project and connect strava-mcp using /mcp.')
     if args.apply:
         if args.activity_id is not None or args.gemini:
             parser.error("--apply uses the exact saved draft; omit --activity-id and --gemini")

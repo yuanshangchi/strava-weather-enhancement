@@ -174,42 +174,36 @@ See [aws/README.md](aws/README.md) for the Lambda receiver, FIFO worker,
 cloud credential migration, deployment, and Strava subscription steps.
 Publishing defaults to disabled. Local preview/apply commands still work.
 
-## Gemini comparison recap
+## Claude analysis through official Strava MCP
 
-Opt into Gemini when preparing a new draft:
-
-```sh
-.venv/bin/python sync_description.py --activity-id 20510125614 --gemini --draft gemini_description_draft.json
-```
-
-The current run and selected similar-route run's **detail** responses provide
-allowlisted distance, formatted durations, pace, elevation, heart rate,
-`relative_effort` from `suffer_score`, and `reported_effort_1_to_10` from
-`perceived_exertion` when present and valid. Relative Effort is accumulated
-workload, not a reported feeling or pure intensity score. Missing fields remain
-null; Relative Effort never substitutes for a missing perceived-exertion rating.
-Each run's weather and Python-computed current-minus-comparison differences are
-sent without activity IDs, titles, descriptions, GPS coordinates, or credentials.
-No match or unavailable comparison weather is represented explicitly.
-
-Set GEMINI_API_KEY in .env for local use. Default model: gemini-3.1-flash-lite;
-override with --model. Without --gemini, the deterministic weather template is
-used. The Gemini prompt allows cautious possible weather effects but prohibits
-causal conclusions and invented feelings. JSON shape, completion, size and
-reserved-marker checks run; these are not comprehensive factual verification.
-Review every preview. Recaps target two or three short sentences (at most 50 words), one per line.
-Only the Open-Meteo source credit is appended; disclaimers stay in the saved
-JSON caveats and input metadata, not in the displayed description.
-Invalid output, missing key, quota or network errors fall back to the template.
-The draft records generation mode, model, prompt version, input and output for
-review, without keys. Model generation is not deterministic. Re-running preview
-may generate different wording; --apply always reuses the exact saved draft:
+Strava's official MCP is configured in `.mcp.json` for Claude Code in this
+project. This is a read-only, interactive analysis workflow, not a replacement
+for webhook-triggered description writes. A paid Strava subscription is required.
 
 ```sh
-.venv/bin/python sync_description.py --apply --draft gemini_description_draft.json
+cd /Users/admin/Documents/Codex/2026-09-15/i-w/outputs/strava-weather
+claude
 ```
 
-A crash before draft persistence can regenerate a recap. Once saved, AWS retries
-reuse that draft and do not invoke Gemini again. Existing previews do not change.
-Strava's restrictions on API-derived data in AI applications still apply; this
-integration does not remove those restrictions.
+Approve the project's `strava-mcp` server when prompted. Run `/mcp`, select
+`strava-mcp`, and authenticate in the browser. Configuration alone does not
+complete authorization. The official server is https://mcp.strava.com/mcp.
+
+Suggested first prompt:
+
+> Use only the official strava-mcp tools to read runs 20510125614 and
+> 19831360183. Compare their distance, pace, heart rate, and Relative Effort.
+> Keep Relative Effort separate from self-reported perceived exertion. Use
+> short sentences, one per line. Do not invent missing data or claim weather
+> caused performance changes. If weather is unavailable, say so. Do not read
+> local activity exports, credentials, or call the REST API as an alternative.
+
+Claude's MCP access does not automatically supply Open-Meteo weather or edit
+Strava descriptions. No Claude API key or custom REST-to-MCP proxy is needed.
+For the separate deterministic weather workflow, use sync_description.py
+without --gemini. The --gemini CLI option is retired and rejected; AWS workers
+ignore any old gemini_api_key secret field. Experimental Gemini helper modules
+and existing drafts remain on disk but are not used by these entry points.
+Existing AWS deployments would need redeployment to pick up this change.
+
+Official setup: https://support.strava.com/en-us/articles/15401531-what-is-the-strava-mcp-connector

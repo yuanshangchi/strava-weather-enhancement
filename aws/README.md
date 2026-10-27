@@ -108,15 +108,11 @@ From the project directory:
 
 Tests use fake services and never call Strava, AWS, or publish descriptions.
 
-## Optional Gemini narration
+## AI analysis moved to Claude
 
-Add a `gemini_api_key` field alongside `client_id`, `client_secret`, and `tokens`
-in the existing Strava secret to enable Gemini for new worker drafts. Without
-that field the worker uses the deterministic weather template. The key is read
-only at runtime, never logged or stored in a draft. It is preserved during
-Strava token rotation. Package staging includes comparison_recap.py and
-generate_recap.py; no extra Python dependencies are needed for Gemini REST calls.
-Stored drafts are reused on retries, including template fallbacks. Adding a key
-or changing code does not regenerate already previewed/published drafts.
-After updating code, rebuild and deploy the package; local changes do not update
-an existing AWS deployment.
+The worker always uses the deterministic weather template. It ignores any old
+`gemini_api_key` field in the Strava secret. Personal AI analysis is configured
+separately in Claude Code through Strava's official read-only MCP; see the main
+README. This does not add Claude or MCP calls to the Lambda worker.
+Rebuild and redeploy to change an existing deployment. Previously saved drafts
+remain unchanged and are still reused by retries.

@@ -28,7 +28,7 @@ def credentials(secret_client):
             raise RuntimeError('Incomplete token refresh')
         tokens.update(refreshed)
         secret_client.put_secret_value(SecretId=os.environ['STRAVA_SECRET_ARN'], SecretString=json.dumps(data))
-    return tokens | {'_gemini_api_key': data.get('gemini_api_key')}
+    return tokens
 
 
 def process(message, secret_client, table):
@@ -52,10 +52,9 @@ def process(message, secret_client, table):
         if not is_run(activity):
             table.put_item(Item={'id': key, 'status': 'skipped'})
             return 'skipped'
-        options = {}
-        if tokens.get('_gemini_api_key'):
-            options = {'use_gemini': True, 'gemini_key': tokens['_gemini_api_key']}
-        draft = prepare_draft(activity_id, token=token, activity=activity, **options)
+        # AI analysis now happens in Claude through Strava's official MCP.
+        # Old gemini_api_key fields in secrets must not enable REST-to-AI calls.
+        draft = prepare_draft(activity_id, token=token, activity=activity)
         # JSON string avoids DynamoDB float conversion and retains exact draft text.
         table.put_item(Item={'id': key, 'status': 'prepared', 'draft': json.dumps(draft)})
     publishing = os.environ.get('PUBLISH_ENABLED', 'false') == 'true'
